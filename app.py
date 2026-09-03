@@ -5,34 +5,11 @@ import numpy as np
 from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
- 
+
 st.set_page_config(page_title="ちょるこ式スイングトレード判定", layout="wide")
 st.title("ちょるこ式スイングトレード判定")
 st.caption("ZAi 2026年9月号掲載手法 STEP3版")
- 
-HOLDINGS = [
-    ("1332", "ニッスイ"),
-    ("2282", "日本ハム"),
-    ("2432", "ディーエヌエー"),
-    ("2914", "JT"),
-    ("3167", "TOKAIホールディングス"),
-    ("3968", "セグエ"),
-    ("4503", "アステラス製薬"),
-    ("4765", "SBIアセットM"),
-    ("5261", "リソル"),
-    ("6758", "ソニーグループ"),
-    ("6803", "ティアック"),
-import yfinance as yf
-import pandas as pd
-import numpy as np
-from datetime import datetime
-import warnings
-warnings.filterwarnings("ignore")
- 
-st.set_page_config(page_title="ちょるこ式スイングトレード判定", layout="wide")
-st.title("ちょるこ式スイングトレード判定")
-st.caption("ZAi 2026年9月号掲載手法 STEP3版")
- 
+
 HOLDINGS = [
     ("1332", "ニッスイ"),
     ("2282", "日本ハム"),
@@ -56,7 +33,94 @@ HOLDINGS = [
     ("9531", "東京ガス"),
     ("9672", "東京都競馬"),
 ]
- 
+
+LARGE_CAP_STOCKS = [
+    ("7203", "トヨタ自動車"),
+    ("6758", "ソニーグループ"),
+    ("9984", "ソフトバンクグループ"),
+    ("6861", "キーエンス"),
+    ("9432", "NTT"),
+    ("9433", "KDDI"),
+    ("8306", "三菱UFJ"),
+    ("7974", "任天堂"),
+    ("4063", "信越化学工業"),
+    ("6954", "ファナック"),
+    ("4519", "中外製薬"),
+    ("2914", "JT"),
+    ("8058", "三菱商事"),
+    ("6902", "デンソー"),
+    ("9101", "日本郵船"),
+    ("4503", "アステラス製薬"),
+    ("8766", "東京海上HD"),
+    ("7267", "本田技研工業"),
+    ("4502", "武田薬品工業"),
+    ("9020", "JR東日本"),
+    ("6367", "ダイキン工業"),
+    ("8411", "みずほFG"),
+    ("8316", "三井住友FG"),
+    ("6501", "日立製作所"),
+    ("4543", "テルモ"),
+    ("4568", "第一三共"),
+    ("7741", "HOYA"),
+    ("6146", "ディスコ"),
+    ("9983", "ファーストリテイリング"),
+    ("6762", "TDK"),
+    ("7751", "キヤノン"),
+    ("6971", "京セラ"),
+    ("8001", "伊藤忠商事"),
+    ("4661", "オリエンタルランド"),
+    ("6723", "ルネサスエレクトロニクス"),
+    ("8802", "三菱地所"),
+    ("3382", "セブン&アイ"),
+    ("8031", "三井物産"),
+    ("6594", "ニデック"),
+    ("6273", "SMC"),
+    ("6857", "アドバンテスト"),
+    ("8604", "野村HD"),
+    ("7270", "SUBARU"),
+    ("1925", "大和ハウス工業"),
+    ("9531", "東京ガス"),
+    ("2802", "味の素"),
+    ("4523", "エーザイ"),
+    ("6301", "小松製作所"),
+    ("6702", "富士通"),
+    ("7201", "日産自動車"),
+    ("4911", "資生堂"),
+    ("9022", "JR東海"),
+    ("8630", "SOMPO HD"),
+    ("7733", "オリンパス"),
+    ("2413", "エムスリー"),
+    ("6981", "村田製作所"),
+    ("4578", "大塚HD"),
+    ("6098", "リクルートHD"),
+    ("7832", "バンダイナムコ"),
+    ("9021", "JR西日本"),
+    ("8750", "第一生命HD"),
+    ("3659", "ネクソン"),
+    ("4704", "トレンドマイクロ"),
+    ("8309", "三井住友トラスト"),
+    ("2502", "アサヒグループ"),
+    ("2503", "キリンHD"),
+    ("4452", "花王"),
+    ("6326", "クボタ"),
+    ("5401", "日本製鉄"),
+    ("4188", "三菱ケミカルグループ"),
+    ("5020", "ENEOS HD"),
+    ("1605", "INPEX"),
+    ("7011", "三菱重工業"),
+    ("7013", "IHI"),
+    ("6302", "住友重機械工業"),
+    ("5332", "TOTO"),
+    ("9202", "ANA HD"),
+    ("9201", "JAL"),
+    ("3405", "クラレ"),
+    ("2270", "雪印メグミルク"),
+    ("2282", "日本ハム"),
+    ("1332", "ニッスイ"),
+    ("9104", "商船三井"),
+    ("9107", "川崎汽船"),
+]
+
 def calc_rci(series, period=9):
     if len(series) < period:
         return 0.0
@@ -66,7 +130,7 @@ def calc_rci(series, period=9):
     pr = pd.Series(recent).rank(ascending=True).values
     dsq = np.sum((dr-pr)**2)
     return round((1 - 6*dsq/(n*(n**2-1)))*100, 1)
- 
+
 def calc_step3(df):
     close = df["Close"]
     ma25  = close.rolling(25).mean()
@@ -82,23 +146,23 @@ def calc_step3(df):
         "bb_sigma":   round(bb_sigma, 2),
         "rci":        round(rci, 1),
     }
- 
+
 mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"], index=1)
- 
+
 if mode == "時価総額フィルター":
     tier = st.selectbox("時価総額", ["10兆円以上", "5兆円以上", "1兆円以上"])
     tier_map = {"10兆円以上": 10_000_000_000_000, "5兆円以上": 5_000_000_000_000, "1兆円以上": 1_000_000_000_000}
     threshold = tier_map[tier]
 else:
     threshold = 0
- 
+
 if st.button("スキャン開始", type="primary"):
     results = []
     progress = st.progress(0)
     status = st.empty()
- 
-    targets = HOLDINGS if mode == "保有銘柄（21銘柄）" else HOLDINGS
- 
+
+    targets = HOLDINGS if mode == "保有銘柄（21銘柄）" else LARGE_CAP_STOCKS
+
     for i, (code, name) in enumerate(targets):
         status.text(f"取得中: {name}...")
         progress.progress((i+1)/len(targets))
@@ -121,14 +185,14 @@ if st.button("スキャン開始", type="primary"):
             results.append({"code":code,"name":name,"s3n":s3n,**s3})
         except:
             continue
- 
+
     status.empty()
     progress.empty()
- 
+
     results.sort(key=lambda x: -x["s3n"])
- 
+
     st.subheader(f"判定結果 / {len(results)}銘柄")
- 
+
     for d in results:
         if d["s3n"] >= 3:
             color = "🟢"
@@ -136,7 +200,7 @@ if st.button("スキャン開始", type="primary"):
             color = "🟡"
         else:
             color = "🔴"
- 
+
         with st.expander(f"{color} {d['name']} ({d['code']})　STEP3: {d['s3n']}/4クリア　株価: ¥{d['price']:,}　前日比: {d['change_pct']:+.1f}%"):
             col1, col2 = st.columns(2)
             with col1:
@@ -145,5 +209,5 @@ if st.button("スキャン開始", type="primary"):
             with col2:
                 st.write("✅" if d["bb_sigma"] <= -3.0 else "❌", f"BB: {d['bb_sigma']:.2f}σ")
                 st.write("✅" if d["rci"] <= -80 else "❌", f"RCI: {d['rci']:.0f}%")
- 
+
 st.caption("⚠️ 投資判断はご自身の責任で")
