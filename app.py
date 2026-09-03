@@ -22,6 +22,29 @@ HOLDINGS = [
     ("5261", "リソル"),
     ("6758", "ソニーグループ"),
     ("6803", "ティアック"),
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import warnings
+warnings.filterwarnings("ignore")
+ 
+st.set_page_config(page_title="ちょるこ式スイングトレード判定", layout="wide")
+st.title("ちょるこ式スイングトレード判定")
+st.caption("ZAi 2026年9月号掲載手法 STEP3版")
+ 
+HOLDINGS = [
+    ("1332", "ニッスイ"),
+    ("2282", "日本ハム"),
+    ("2432", "ディーエヌエー"),
+    ("2914", "JT"),
+    ("3167", "TOKAIホールディングス"),
+    ("3968", "セグエ"),
+    ("4503", "アステラス製薬"),
+    ("4765", "SBIアセットM"),
+    ("5261", "リソル"),
+    ("6758", "ソニーグループ"),
+    ("6803", "ティアック"),
     ("8304", "あおぞら銀行"),
     ("8410", "セブン銀行"),
     ("8473", "SBI"),
@@ -60,7 +83,7 @@ def calc_step3(df):
         "rci":        round(rci, 1),
     }
  
-mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"])
+mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"], index=1)
  
 if mode == "時価総額フィルター":
     tier = st.selectbox("時価総額", ["10兆円以上", "5兆円以上", "1兆円以上"])
