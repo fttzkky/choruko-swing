@@ -29,7 +29,7 @@ TIER_THRESHOLDS = {
 def get_prime_stocks():
     url = (
         "https://www.jpx.co.jp/markets/statistics-equities/misc/"
-        "tvdivq0000001vg2-att/data_j.xls"
+        "tvdivq0000001vg2-att/data_j.xlsx"
     )
     try:
         df = pd.read_excel(url, header=0)
