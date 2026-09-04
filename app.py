@@ -43,7 +43,7 @@ def get_prime_stocks():
         return [
             (str(int(row[code_col])).zfill(4), str(row[name_col]).strip())
             for _, row in prime.iterrows()
-            if str(row[code_col]).strip() not in ("", "nan")
+            if str(row[code_col]).strip() not in ("", "nan") and str(row[code_col]).strip().isdigit()
         ]
     except Exception as e:
         st.error(f"JPX取得失敗: {e}")
