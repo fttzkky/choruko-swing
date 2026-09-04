@@ -41,7 +41,7 @@ def get_prime_stocks():
             return []
         prime = df[df[seg_col].astype(str).str.contains("プライム", na=False)]
         return [
-            (str(int(row[code_col])).zfill(4), str(row[name_col]).strip())
+            (str(row[code_col]).strip()).zfill(4), str(row[name_col]).strip())
             for _, row in prime.iterrows()
             if str(row[code_col]).strip() not in ("", "nan") and str(row[code_col]).strip().isdigit()
         ]
