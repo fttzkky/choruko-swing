@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings("ignore")
  
 st.set_page_config(page_title="ちょるこ式スイングトレード判定", layout="wide")
@@ -85,6 +86,26 @@ def calc_step3(df):
 def fetch_stock(code):
     return yf.Ticker(f"{code}.T").history(period="60d")
  
+def scan_one(code, name, mode, threshold):
+    try:
+        if mode == "時価総額フィルター":
+            cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
+            if cap < threshold:
+                return None
+        df = fetch_stock(code)
+        if len(df) < 30:
+            return None
+        s3  = calc_step3(df)
+        s3n = sum([
+            s3["change_pct"] <= -2.5,
+            s3["ma25_dev"]   <  0,
+            s3["bb_sigma"]   <= -3.0,
+            s3["rci"]        <= -80,
+        ])
+        return {"code": code, "name": name, "s3n": s3n, **s3}
+    except Exception:
+        return None
+ 
 mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"], index=1)
  
 if mode == "時価総額フィルター":
@@ -102,28 +123,19 @@ if st.button("スキャン開始", type="primary"):
     progress = st.progress(0)
     status   = st.empty()
     total    = len(targets)
+    done     = [0]
  
-    for i, (code, name) in enumerate(targets):
-        status.text(f"確認中: {name} ({i+1}/{total})")
-        progress.progress((i + 1) / total)
-        try:
-            if mode == "時価総額フィルター":
-                cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
-                if cap < threshold:
-                    continue
-            df = fetch_stock(code)
-            if len(df) < 30:
-                continue
-            s3  = calc_step3(df)
-            s3n = sum([
-                s3["change_pct"] <= -2.5,
-                s3["ma25_dev"]   <  0,
-                s3["bb_sigma"]   <= -3.0,
-                s3["rci"]        <= -80,
-            ])
-            results.append({"code": code, "name": name, "s3n": s3n, **s3})
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = {ex.submit(scan_one, code, name, mode, threshold): (code, name)
+                   for code, name in targets}
+        for fut in as_completed(futures):
+            done[0] += 1
+            _, name = futures[fut]
+            status.text(f"確認中: {name} ({done[0]}/{total})")
+            progress.progress(done[0] / total)
+            r = fut.result()
+            if r is not None:
+                results.append(r)
  
     status.empty()
     progress.empty()
@@ -145,4 +157,3 @@ if st.button("スキャン開始", type="primary"):
                 st.write("✅" if d["rci"]      <= -80  else "❌", f"RCI: {d['rci']:.0f}%")
  
 st.caption("⚠️ 投資判断はご自身の責任で")
- 
