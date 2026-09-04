@@ -40,11 +40,17 @@ def get_prime_stocks():
             st.error(f"JPX列名が変わりました: {list(df.columns)}")
             return []
         prime = df[df[seg_col].astype(str).str.contains("プライム", na=False)]
-        return [
-            (str(row[code_col]).strip()).zfill(4), str(row[name_col]).strip())
-            for _, row in prime.iterrows()
-            if str(row[code_col]).strip() not in ("", "nan") and str(row[code_col]).strip().isdigit()
-        ]
+        result = []
+        for _, row in prime.iterrows():
+            code_raw = str(row[code_col]).strip()
+            if code_raw in ("", "nan"):
+                continue
+            try:
+                code = str(int(float(code_raw))).zfill(4)
+            except (ValueError, TypeError):
+                continue
+            result.append((code, str(row[name_col]).strip()))
+        return result
     except Exception as e:
         st.error(f"JPX取得失敗: {e}")
         return []
@@ -79,7 +85,6 @@ def calc_step3(df):
 def fetch_stock(code):
     return yf.Ticker(f"{code}.T").history(period="60d")
  
-# ─── UI ───────────────────────────────────────────────────────────────────
 mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"], index=1)
  
 if mode == "時価総額フィルター":
@@ -93,7 +98,6 @@ else:
  
 if st.button("スキャン開始", type="primary"):
     targets = HOLDINGS if mode == "保有銘柄（21銘柄）" else all_prime
- 
     results  = []
     progress = st.progress(0)
     status   = st.empty()
@@ -103,16 +107,13 @@ if st.button("スキャン開始", type="primary"):
         status.text(f"確認中: {name} ({i+1}/{total})")
         progress.progress((i + 1) / total)
         try:
-            # 時価総額フィルター：fast_infoでリアルタイム判定
             if mode == "時価総額フィルター":
                 cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
                 if cap < threshold:
                     continue
- 
             df = fetch_stock(code)
             if len(df) < 30:
                 continue
- 
             s3  = calc_step3(df)
             s3n = sum([
                 s3["change_pct"] <= -2.5,
@@ -126,7 +127,6 @@ if st.button("スキャン開始", type="primary"):
  
     status.empty()
     progress.empty()
- 
     results.sort(key=lambda x: -x["s3n"])
     st.subheader(f"判定結果 / {len(results)}銘柄")
  
@@ -145,3 +145,4 @@ if st.button("スキャン開始", type="primary"):
                 st.write("✅" if d["rci"]      <= -80  else "❌", f"RCI: {d['rci']:.0f}%")
  
 st.caption("⚠️ 投資判断はご自身の責任で")
+ 
