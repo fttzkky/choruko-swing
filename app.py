@@ -66,12 +66,20 @@ def calc_rci(series, period=9):
     dsq = np.sum((dr - pr) ** 2)
     return round((1 - 6 * dsq / (n * (n ** 2 - 1))) * 100, 1)
 
-def calc_step3(df):
-    close    = df["Close"]
+def calc_step3_at(df, end_idx):
+    if end_idx == -1:
+        sub = df
+    else:
+        sub = df.iloc[:end_idx + 1]
+    if len(sub) < 30:
+        return None
+    close    = sub["Close"]
     ma25     = close.rolling(25).mean()
     ma50     = close.rolling(50).mean()
     ma100    = close.rolling(100).mean()
     bb_std   = close.rolling(25).std()
+    if pd.isna(ma25.iloc[-1]) or pd.isna(bb_std.iloc[-1]) or bb_std.iloc[-1] == 0:
+        return None
     bb_sigma = (close.iloc[-1] - ma25.iloc[-1]) / bb_std.iloc[-1]
     rci      = calc_rci(close, 9)
     change   = (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100
@@ -88,11 +96,19 @@ def calc_step3(df):
         "rci":        round(rci, 1),
     }
 
+def count_s3n(s3):
+    return sum([
+        s3["change_pct"] <= -2.5,
+        s3["ma25_dev"]   <  0,
+        s3["bb_sigma"]   <= -3.0,
+        s3["rci"]        <= -80,
+    ])
+
 @st.cache_data(ttl=3600)
 def fetch_stock(code):
     return yf.Ticker(f"{code}.T").history(period="180d")
 
-def scan_one(code, name, mode, threshold):
+def scan_one(code, name, mode, threshold, lookback_days):
     try:
         if mode == "時価総額フィルター":
             cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
@@ -101,14 +117,36 @@ def scan_one(code, name, mode, threshold):
         df = fetch_stock(code)
         if len(df) < 30:
             return None
-        s3  = calc_step3(df)
-        s3n = sum([
-            s3["change_pct"] <= -2.5,
-            s3["ma25_dev"]   <  0,
-            s3["bb_sigma"]   <= -3.0,
-            s3["rci"]        <= -80,
-        ])
-        return {"code": code, "name": name, "s3n": s3n, **s3}
+
+        s3_today = calc_step3_at(df, -1)
+        if s3_today is None:
+            return None
+        s3n_today = count_s3n(s3_today)
+
+        best_s3n  = s3n_today
+        best_date = str(df.index[-1].date())
+        best_s3   = s3_today
+
+        for i in range(1, lookback_days):
+            idx = len(df) - 1 - i
+            if idx < 30:
+                break
+            s3_past = calc_step3_at(df, idx)
+            if s3_past is None:
+                continue
+            s3n_past = count_s3n(s3_past)
+            if s3n_past > best_s3n:
+                best_s3n  = s3n_past
+                best_date = str(df.index[idx].date())
+                best_s3   = s3_past
+
+        return {
+            "code": code, "name": name,
+            "s3n": s3n_today, "s3n_best": best_s3n, "best_date": best_date,
+            "is_past_hit": best_s3n > s3n_today,
+            **s3_today,
+            "best_s3": best_s3,
+        }
     except Exception:
         return None
 
@@ -123,6 +161,8 @@ else:
     all_prime = None
     threshold = 0
 
+lookback_days = st.slider("過去何営業日まで遡るか", min_value=1, max_value=10, value=5)
+
 if st.button("スキャン開始", type="primary"):
     targets = HOLDINGS if mode == "保有銘柄（21銘柄）" else all_prime
     results  = []
@@ -132,7 +172,7 @@ if st.button("スキャン開始", type="primary"):
     done     = [0]
 
     with ThreadPoolExecutor(max_workers=20) as ex:
-        futures = {ex.submit(scan_one, code, name, mode, threshold): (code, name)
+        futures = {ex.submit(scan_one, code, name, mode, threshold, lookback_days): (code, name)
                    for code, name in targets}
         for fut in as_completed(futures):
             done[0] += 1
@@ -145,25 +185,47 @@ if st.button("スキャン開始", type="primary"):
 
     status.empty()
     progress.empty()
-    results.sort(key=lambda x: -x["s3n"])
-    st.subheader(f"判定結果 / {len(results)}銘柄")
 
-    for d in results:
-        color = "🟢" if d["s3n"] >= 3 else ("🟡" if d["s3n"] >= 2 else "🔴")
+    today_hits = [r for r in results if r["s3n"] >= 3]
+    today_hits.sort(key=lambda x: -x["s3n"])
+
+    past_hits = [r for r in results if r["s3n"] < 3 and r["s3n_best"] >= 3]
+    past_hits.sort(key=lambda x: (-x["s3n_best"], x["best_date"]))
+
+    def show_card(d, use_best=False):
+        s3  = d["best_s3"] if use_best else d
+        s3n = d["s3n_best"] if use_best else d["s3n"]
+        color = "🟢" if s3n >= 3 else ("🟡" if s3n >= 2 else "🔴")
+        date_label = f"　📅 {d['best_date']}" if use_best else ""
         with st.expander(
-            f"{color} {d['name']} ({d['code']})　STEP3: {d['s3n']}/4クリア"
+            f"{color} {d['name']} ({d['code']})　STEP3: {s3n}/4クリア{date_label}"
             f"　株価: ¥{d['price']:,}　前日比: {d['change_pct']:+.1f}%"
         ):
             col1, col2 = st.columns(2)
             with col1:
-                st.write("✅" if d["change_pct"] <= -2.5 else "❌", f"前日比: {d['change_pct']:+.1f}%")
-                st.write("✅" if d["ma25_dev"]   <  0    else "❌", f"MA25乖離: {d['ma25_dev']:+.1f}%")
-                ma50_str  = f"{d['ma50_dev']:+.1f}%"  if d["ma50_dev"]  is not None else "データ不足"
-                ma100_str = f"{d['ma100_dev']:+.1f}%" if d["ma100_dev"] is not None else "データ不足"
+                st.write("✅" if s3["change_pct"] <= -2.5 else "❌", f"前日比: {s3['change_pct']:+.1f}%")
+                st.write("✅" if s3["ma25_dev"]   <  0    else "❌", f"MA25乖離: {s3['ma25_dev']:+.1f}%")
+                ma50_str  = f"{s3['ma50_dev']:+.1f}%"  if s3["ma50_dev"]  is not None else "データ不足"
+                ma100_str = f"{s3['ma100_dev']:+.1f}%" if s3["ma100_dev"] is not None else "データ不足"
                 st.write("📊", f"MA50乖離: {ma50_str}")
                 st.write("📊", f"MA100乖離: {ma100_str}")
             with col2:
-                st.write("✅" if d["bb_sigma"] <= -3.0 else "❌", f"BB: {d['bb_sigma']:.2f}σ")
-                st.write("✅" if d["rci"]      <= -80  else "❌", f"RCI: {d['rci']:.0f}%")
+                st.write("✅" if s3["bb_sigma"] <= -3.0 else "❌", f"BB: {s3['bb_sigma']:.2f}σ")
+                st.write("✅" if s3["rci"]      <= -80  else "❌", f"RCI: {s3['rci']:.0f}%")
+
+    st.subheader(f"🔴 本日 3/4以上クリア / {len(today_hits)}銘柄")
+    if today_hits:
+        for d in today_hits:
+            show_card(d)
+    else:
+        st.info("本日該当なし")
+
+    st.divider()
+    st.subheader(f"🕐 過去{lookback_days}営業日以内に3/4クリアあり / {len(past_hits)}銘柄")
+    if past_hits:
+        for d in past_hits:
+            show_card(d, use_best=True)
+    else:
+        st.info("該当なし")
 
 st.caption("⚠️ 投資判断はご自身の責任で")
