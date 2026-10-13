@@ -18,7 +18,10 @@ HOLDINGS = [
     ("8410", "セブン銀行"), ("8473", "SBI"), ("8729", "ソニーFG"),
     ("9101", "日本郵船"), ("9432", "NTT"), ("9433", "KDDI"),
     ("9434", "ソフトバンク"), ("9531", "東京ガス"), ("9672", "東京都競馬"),
+    ("1570", "日経レバ(1570)"),
 ]
+
+ALWAYS_INCLUDE = {"1570"}  # ETFは時価総額フィルターを免除
 
 TIER_THRESHOLDS = {
     "10兆円以上": 10_000_000_000_000,
@@ -110,7 +113,7 @@ def fetch_stock(code):
 
 def scan_one(code, name, mode, threshold, lookback_days):
     try:
-        if mode == "時価総額フィルター":
+        if mode == "時価総額フィルター" and code not in ALWAYS_INCLUDE:
             cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
             if cap < threshold:
                 return None
@@ -150,7 +153,7 @@ def scan_one(code, name, mode, threshold, lookback_days):
     except Exception:
         return None
 
-mode = st.radio("スキャン対象", ["保有銘柄（21銘柄）", "時価総額フィルター"], index=1)
+mode = st.radio("スキャン対象", ["保有銘柄（22銘柄）", "時価総額フィルター"], index=1)
 
 if mode == "時価総額フィルター":
     tier      = st.selectbox("時価総額", list(TIER_THRESHOLDS.keys()))
@@ -164,7 +167,7 @@ else:
 lookback_days = st.slider("過去何営業日まで遡るか", min_value=1, max_value=10, value=5)
 
 if st.button("スキャン開始", type="primary"):
-    targets = HOLDINGS if mode == "保有銘柄（21銘柄）" else all_prime
+    targets = HOLDINGS if mode == "保有銘柄（22銘柄）" else all_prime + [h for h in HOLDINGS if h[0] in ALWAYS_INCLUDE and h[0] not in {c for c, _ in all_prime}]
     results  = []
     progress = st.progress(0)
     status   = st.empty()
