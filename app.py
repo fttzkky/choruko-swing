@@ -6,8 +6,8 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="ちょるこ式スイングトレード判定", layout="wide")
-st.title("ちょるこ式スイングトレード判定")
+st.set_page_config(page_title="ちょる子式スイングトレード判定", layout="wide")
+st.title("ちょる子式スイングトレード判定")
 st.caption("ZAi 2026年9月号掲載手法 STEP3版")
 
 HOLDINGS = [
