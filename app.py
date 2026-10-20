@@ -3,6 +3,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import warnings
+import time
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings("ignore")
 
@@ -108,18 +110,40 @@ def count_s3n(s3):
         s3["rci"]        <= -80,
     ])
 
+def _retry(fn, tries=4):
+    """Yahooのアクセス制限（Too Many Requests）のときは、待ってから再試行する"""
+    last = None
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            last = e
+            msg = str(e)
+            if "Too Many" in msg or "Rate limit" in msg or "rate limit" in msg:
+                time.sleep(2 ** i + random.random())
+                continue
+            raise
+    raise last
+
 @st.cache_data(ttl=3600)
 def fetch_stock(code):
-    return yf.Ticker(f"{code}.T").history(period="180d")
+    df = _retry(lambda: yf.Ticker(f"{code}.T").history(period="180d"))
+    if df is None or len(df) == 0:
+        raise RuntimeError("株価データが空でした")
+    return df
+
+@st.cache_data(ttl=86400)
+def fetch_cap(code):
+    return _retry(lambda: getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None)) or 0
 
 def _fail(code, name, reason):
-    # ETF（1570・1568・1306）は、結果に出ない理由を画面で見られるよう、理由を返す
-    return {"code": code, "name": name, "error": reason} if code in ALWAYS_INCLUDE else None
+    # 失敗は黙って捨てず、理由を返す（画面で件数と理由を見られるようにする）
+    return {"code": code, "name": name, "error": reason}
 
 def scan_one(code, name, mode, threshold, lookback_days):
     try:
         if mode == "時価総額フィルター" and code not in ALWAYS_INCLUDE:
-            cap = getattr(yf.Ticker(f"{code}.T").fast_info, "market_cap", None) or 0
+            cap = fetch_cap(code)
             if cap < threshold:
                 return None
         df = fetch_stock(code)
@@ -178,14 +202,24 @@ else:
 lookback_days = st.slider("過去何営業日まで遡るか", min_value=1, max_value=10, value=5)
 
 if st.button("スキャン開始", type="primary"):
-    targets = HOLDINGS if mode == "保有銘柄（25銘柄）" else all_prime + [h for h in HOLDINGS if h[0] in ALWAYS_INCLUDE and h[0] not in {c for c, _ in all_prime}]
+    base = HOLDINGS if mode == "保有銘柄（25銘柄）" else all_prime
+    etf_codes = ["1570", "1568", "1306"]
+    targets = [t for t in base if t[0] not in ALWAYS_INCLUDE]
     results  = []
     progress = st.progress(0)
     status   = st.empty()
-    total    = len(targets)
+    total    = len(targets) + len(etf_codes)
     done     = [0]
 
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    # ETFを最初に1件ずつ取得する（アクセス制限に巻き込まれにくくするため）
+    for code in etf_codes:
+        nm = dict(HOLDINGS).get(code, code)
+        status.text(f"確認中: {nm} ({done[0] + 1}/{total})")
+        results.append(scan_one(code, nm, mode, threshold, lookback_days))
+        done[0] += 1
+        progress.progress(done[0] / total)
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futures = {ex.submit(scan_one, code, name, mode, threshold, lookback_days): (code, name)
                    for code, name in targets}
         for fut in as_completed(futures):
@@ -201,7 +235,14 @@ if st.button("スキャン開始", type="primary"):
     progress.empty()
 
     etf_results = {r["code"]: r for r in results if r["code"] in ALWAYS_INCLUDE}
+    failed = [r for r in results if "error" in r and r["code"] not in ALWAYS_INCLUDE]
     results = [r for r in results if "error" not in r]
+    if failed:
+        st.warning(
+            f"⚠️ 株価を取得できなかった銘柄が {len(failed)} 件あります（Yahooのアクセス制限が多い）。"
+            "この結果は不完全です。数分おいて、もう一度スキャンしてください。"
+            f"（理由の例: {failed[0]['error'][:60]}）"
+        )
 
     today_hits = [r for r in results if r["s3n"] >= 3]
     today_hits.sort(key=lambda x: -x["s3n"])
