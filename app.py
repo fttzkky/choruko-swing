@@ -112,6 +112,10 @@ def count_s3n(s3):
 def fetch_stock(code):
     return yf.Ticker(f"{code}.T").history(period="180d")
 
+def _fail(code, name, reason):
+    # ETF（1570・1568・1306）は、結果に出ない理由を画面で見られるよう、理由を返す
+    return {"code": code, "name": name, "error": reason} if code in ALWAYS_INCLUDE else None
+
 def scan_one(code, name, mode, threshold, lookback_days):
     try:
         if mode == "時価総額フィルター" and code not in ALWAYS_INCLUDE:
@@ -120,11 +124,11 @@ def scan_one(code, name, mode, threshold, lookback_days):
                 return None
         df = fetch_stock(code)
         if len(df) < 30:
-            return None
+            return _fail(code, name, f"データが足りません（{len(df)}行）")
 
         s3_today = calc_step3_at(df, -1)
         if s3_today is None:
-            return None
+            return _fail(code, name, "指標を計算できませんでした（直近の終値が欠けている可能性）")
         s3n_today = count_s3n(s3_today)
 
         best_s3n  = s3n_today
@@ -147,12 +151,18 @@ def scan_one(code, name, mode, threshold, lookback_days):
         return {
             "code": code, "name": name,
             "s3n": s3n_today, "s3n_best": best_s3n, "best_date": best_date,
+            "last_date": str(df.index[-1].date()),
             "is_past_hit": best_s3n > s3n_today,
             **s3_today,
             "best_s3": best_s3,
         }
-    except Exception:
-        return None
+    except Exception as e:
+        return _fail(code, name, f"取得エラー: {e}")
+
+@st.cache_data(ttl=600)
+def fetch_n225_close():
+    h = yf.Ticker("^N225").history(period="10d")["Close"].dropna()
+    return float(h.iloc[-1]), str(h.index[-1].date())
 
 mode = st.radio("スキャン対象", ["保有銘柄（25銘柄）", "時価総額フィルター"], index=1)
 
@@ -190,6 +200,9 @@ if st.button("スキャン開始", type="primary"):
     status.empty()
     progress.empty()
 
+    etf_results = {r["code"]: r for r in results if r["code"] in ALWAYS_INCLUDE}
+    results = [r for r in results if "error" not in r]
+
     today_hits = [r for r in results if r["s3n"] >= 3]
     today_hits.sort(key=lambda x: -x["s3n"])
 
@@ -204,6 +217,7 @@ if st.button("スキャン開始", type="primary"):
         with st.expander(
             f"{color} {d['name']} ({d['code']})　STEP3: {s3n}/4クリア{date_label}"
             f"　株価: ¥{d['price']:,}　前日比: {d['change_pct']:+.1f}%"
+            f"　データ日: {d.get('last_date', '-')}"
         ):
             col1, col2 = st.columns(2)
             with col1:
@@ -216,6 +230,30 @@ if st.button("スキャン開始", type="primary"):
             with col2:
                 st.write("✅" if s3["bb_sigma"] <= -3.0 else "❌", f"BB: {s3['bb_sigma']:.2f}σ")
                 st.write("✅" if s3["rci"]      <= -80  else "❌", f"RCI: {s3['rci']:.0f}%")
+
+    st.subheader("📌 ETF（1570・1568・1306）の状況")
+    st.caption("3/4に届かない日も、ここに必ず表示します（取得できない場合は理由も表示）")
+    for code in ["1570", "1568", "1306"]:
+        r = etf_results.get(code)
+        nm = dict(HOLDINGS).get(code, code)
+        if r is None:
+            st.warning(f"{nm}（{code}）: 結果が返ってきませんでした（スキャン対象に入っていない可能性）")
+        elif "error" in r:
+            st.warning(f"{nm}（{code}）: {r['error']}")
+        else:
+            show_card(r)
+    if "1570" in etf_results and "error" not in etf_results["1570"]:
+        try:
+            n225, n225_date = fetch_n225_close()
+            p1570 = etf_results["1570"]["price"]
+            diff = p1570 - n225
+            st.caption(
+                f"1570の終値 {p1570:,}円（{etf_results['1570']['last_date']}） − 日経平均の終値 {n225:,.0f}円（{n225_date}） "
+                f"＝ {diff:+,.0f}円（{'1570が上' if diff > 0 else '1570が下＝あなたの条件を満たしています'}）"
+            )
+        except Exception:
+            st.caption("日経平均の終値を取得できませんでした。")
+    st.divider()
 
     st.subheader(f"🔴 本日 3/4以上クリア / {len(today_hits)}銘柄")
     if today_hits:
