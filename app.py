@@ -5,12 +5,18 @@ import numpy as np
 import warnings
 import time
 import random
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="ちょる子式スイングトレード判定", layout="wide")
 st.title("ちょる子式スイングトレード判定")
 st.caption("ZAi 2026年9月号掲載手法 STEP3版")
+
+st.sidebar.markdown("**アプリ一覧**")
+st.sidebar.markdown("[レバウン式](https://reboun-app-fqpqv4e5nqdkqy3tibcxqn.streamlit.app/)")
+st.sidebar.markdown("[ちょる子式（このアプリ）](https://choruko-swing-dwf39ocwzqubb3uattpjmi.streamlit.app)")
+st.sidebar.markdown("[ひよこ式](https://choruko-swing-anvaomt9aunocm5irspcob.streamlit.app)")
 
 HOLDINGS = [
     ("1332", "ニッスイ"), ("2282", "日本ハム"), ("2432", "ディーエヌエー"),
@@ -110,17 +116,33 @@ def count_s3n(s3):
         s3["rci"]        <= -80,
     ])
 
-def _retry(fn, tries=4):
-    """Yahooのアクセス制限（Too Many Requests）のときは、待ってから再試行する"""
+# アクセス制限が続くときは、全銘柄で待ち続けず、早めに中断する（何時間も終わらない状態を防ぐ）
+RATE_LOCK  = threading.Lock()
+RATE_STATE = {"hits": 0, "stop": False}
+RATE_LIMIT_BREAK = 25   # 制限エラーがこの回数に達したら、残りの取得を中断する
+
+def reset_rate_state():
+    with RATE_LOCK:
+        RATE_STATE["hits"] = 0
+        RATE_STATE["stop"] = False
+
+def _retry(fn, tries=3):
+    """Yahooのアクセス制限（Too Many Requests）のときは、短く待って再試行する。続くときは中断する"""
     last = None
     for i in range(tries):
+        if RATE_STATE["stop"]:
+            raise RuntimeError("Yahooのアクセス制限が続いたため、残りの取得を中断しました")
         try:
             return fn()
         except Exception as e:
             last = e
             msg = str(e)
             if "Too Many" in msg or "Rate limit" in msg or "rate limit" in msg:
-                time.sleep(2 ** i + random.random())
+                with RATE_LOCK:
+                    RATE_STATE["hits"] += 1
+                    if RATE_STATE["hits"] >= RATE_LIMIT_BREAK:
+                        RATE_STATE["stop"] = True
+                time.sleep(1 + i + random.random())
                 continue
             raise
     raise last
@@ -202,6 +224,7 @@ else:
 lookback_days = st.slider("過去何営業日まで遡るか", min_value=1, max_value=10, value=5)
 
 if st.button("スキャン開始", type="primary"):
+    reset_rate_state()
     base = HOLDINGS if mode == "保有銘柄（25銘柄）" else all_prime
     etf_codes = ["1570", "1568", "1306"]
     targets = [t for t in base if t[0] not in ALWAYS_INCLUDE]
@@ -243,6 +266,8 @@ if st.button("スキャン開始", type="primary"):
             "この結果は不完全です。数分おいて、もう一度スキャンしてください。"
             f"（理由の例: {failed[0]['error'][:60]}）"
         )
+    if RATE_STATE["stop"]:
+        st.error("Yahooのアクセス制限が続いたため、スキャンを途中で中断しました。10分ほど待ってから、もう一度スキャンしてください。")
 
     today_hits = [r for r in results if r["s3n"] >= 3]
     today_hits.sort(key=lambda x: -x["s3n"])

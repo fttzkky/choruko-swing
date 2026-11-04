@@ -43,6 +43,11 @@ else:
     st.sidebar.markdown(f"- 閾値: **±{threshold_pct:.1f}%**")
 st.sidebar.markdown(f"- 開始: **{start_year}年〜**")
 st.sidebar.markdown("---")
+st.sidebar.markdown("**アプリ一覧**")
+st.sidebar.markdown("[レバウン式](https://reboun-app-fqpqv4e5nqdkqy3tibcxqn.streamlit.app/)")
+st.sidebar.markdown("[ちょる子式](https://choruko-swing-dwf39ocwzqubb3uattpjmi.streamlit.app)")
+st.sidebar.markdown("[ひよこ式（このアプリ）](https://choruko-swing-anvaomt9aunocm5irspcob.streamlit.app)")
+st.sidebar.markdown("---")
 st.sidebar.markdown("⚠️ 投資判断はご自身の責任で")
 
 @st.cache_data(ttl=3600, show_spinner="日経平均データ取得中...")
