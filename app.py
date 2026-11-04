@@ -171,12 +171,9 @@ def _fail(code, name, reason):
     # 失敗は黙って捨てず、理由を返す（画面で件数と理由を見られるようにする）
     return {"code": code, "name": name, "error": reason}
 
-def scan_one(code, name, mode, threshold, lookback_days):
+def scan_one(code, name, lookback_days):
+    # 株価だけで判定する（時価総額の判定は、3/4に届いた銘柄だけ、あとで行う。問い合わせを大きく減らすため）
     try:
-        if mode == "時価総額フィルター" and code not in ALWAYS_INCLUDE:
-            cap = fetch_cap(code)
-            if cap < threshold:
-                return None
         df = fetch_stock(code)
         if len(df) < 30:
             return _fail(code, name, f"データが足りません（{len(df)}行）")
@@ -251,12 +248,12 @@ if st.button("スキャン開始", type="primary"):
     for code in etf_codes:
         nm = dict(HOLDINGS).get(code, code)
         status.text(f"確認中: {nm} ({done[0] + 1}/{total})")
-        results.append(scan_one(code, nm, mode, threshold, lookback_days))
+        results.append(scan_one(code, nm, lookback_days))
         done[0] += 1
         progress.progress(done[0] / total)
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = {ex.submit(scan_one, code, name, mode, threshold, lookback_days): (code, name)
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = {ex.submit(scan_one, code, name, lookback_days): (code, name)
                    for code, name in targets}
         for fut in as_completed(futures):
             done[0] += 1
@@ -266,6 +263,25 @@ if st.button("スキャン開始", type="primary"):
             r = fut.result()
             if r is not None:
                 results.append(r)
+
+    # 時価総額フィルター：株価で3/4に届いた銘柄だけ、時価総額を調べる（全銘柄を調べるより、はるかに速い）
+    if mode == "時価総額フィルター":
+        cands = [r for r in results
+                 if "error" not in r and r["code"] not in ALWAYS_INCLUDE and r["s3n_best"] >= 3]
+        cand_codes = {r["code"] for r in cands}
+        rest = [r for r in results if r["code"] not in cand_codes]
+        checked = []
+        status.text(f"時価総額を判定中（{len(cands)}銘柄）...")
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            futs = {ex.submit(fetch_cap, r["code"]): r for r in cands}
+            for fut in as_completed(futs):
+                r = futs[fut]
+                try:
+                    if fut.result() >= threshold:
+                        checked.append(r)
+                except Exception as e:
+                    checked.append(_fail(r["code"], r["name"], f"時価総額の取得エラー: {e}"))
+        results = rest + checked
 
     status.empty()
     progress.empty()
