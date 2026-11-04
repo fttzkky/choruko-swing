@@ -219,7 +219,7 @@ def fetch_n225_close():
 mode = st.radio("スキャン対象", ["保有銘柄（25銘柄）", "時価総額フィルター"], index=1)
 
 if mode == "時価総額フィルター":
-    tier      = st.selectbox("時価総額", list(TIER_THRESHOLDS.keys()))
+    tier      = st.radio("時価総額", list(TIER_THRESHOLDS.keys()), horizontal=True)
     threshold = TIER_THRESHOLDS[tier]
     all_prime = None
     st.caption(f"「スキャン開始」を押すと、JPXから東証プライムの銘柄一覧を取得し、時価総額{tier}をリアルタイムに判定します")
