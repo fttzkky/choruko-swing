@@ -6,6 +6,8 @@ import warnings
 import time
 import random
 import threading
+import io
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings("ignore")
 
@@ -44,28 +46,35 @@ def get_prime_stocks():
         "https://www.jpx.co.jp/markets/statistics-equities/misc/"
         "tvdivq0000001vg2-att/data_j.xlsx"
     )
+    # 時間切れを30秒に設定（応答がないまま待ち続けないため）。失敗時は例外にして、保存（キャッシュ）しない
+    resp = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    df = pd.read_excel(io.BytesIO(resp.content), header=0)
+    seg_col  = next((c for c in df.columns if "市場" in str(c) or "商品" in str(c)), None)
+    code_col = next((c for c in df.columns if "コード" in str(c) or "code" in str(c).lower()), None)
+    name_col = next((c for c in df.columns if "銘柄" in str(c) or "name" in str(c).lower()), None)
+    if not all([seg_col, code_col, name_col]):
+        raise RuntimeError(f"JPXの列名が変わりました: {list(df.columns)}")
+    prime = df[df[seg_col].astype(str).str.contains("プライム", na=False)]
+    result = []
+    for _, row in prime.iterrows():
+        code_raw = str(row[code_col]).strip()
+        if code_raw in ("", "nan"):
+            continue
+        try:
+            code = str(int(float(code_raw))).zfill(4)
+        except (ValueError, TypeError):
+            continue
+        result.append((code, str(row[name_col]).strip()))
+    if not result:
+        raise RuntimeError("プライム銘柄を1件も読み取れませんでした")
+    return result
+
+def load_prime():
     try:
-        df = pd.read_excel(url, header=0)
-        seg_col  = next((c for c in df.columns if "市場" in str(c) or "商品" in str(c)), None)
-        code_col = next((c for c in df.columns if "コード" in str(c) or "code" in str(c).lower()), None)
-        name_col = next((c for c in df.columns if "銘柄" in str(c) or "name" in str(c).lower()), None)
-        if not all([seg_col, code_col, name_col]):
-            st.error(f"JPX列名が変わりました: {list(df.columns)}")
-            return []
-        prime = df[df[seg_col].astype(str).str.contains("プライム", na=False)]
-        result = []
-        for _, row in prime.iterrows():
-            code_raw = str(row[code_col]).strip()
-            if code_raw in ("", "nan"):
-                continue
-            try:
-                code = str(int(float(code_raw))).zfill(4)
-            except (ValueError, TypeError):
-                continue
-            result.append((code, str(row[name_col]).strip()))
-        return result
+        return get_prime_stocks()
     except Exception as e:
-        st.error(f"JPX取得失敗: {e}")
+        st.error(f"JPXから銘柄一覧を取得できませんでした: {e}")
         return []
 
 def calc_rci(series, period=9):
@@ -215,8 +224,8 @@ mode = st.radio("スキャン対象", ["保有銘柄（25銘柄）", "時価総�
 if mode == "時価総額フィルター":
     tier      = st.selectbox("時価総額", list(TIER_THRESHOLDS.keys()))
     threshold = TIER_THRESHOLDS[tier]
-    all_prime = get_prime_stocks()
-    st.caption(f"東証プライム: {len(all_prime)}銘柄取得済み → スキャン時に時価総額{tier}をリアルタイム判定")
+    all_prime = None
+    st.caption(f"「スキャン開始」を押すと、JPXから東証プライムの銘柄一覧を取得し、時価総額{tier}をリアルタイムに判定します")
 else:
     all_prime = None
     threshold = 0
@@ -225,6 +234,10 @@ lookback_days = st.slider("過去何営業日まで遡るか", min_value=1, max_
 
 if st.button("スキャン開始", type="primary"):
     reset_rate_state()
+    if mode == "時価総額フィルター":
+        all_prime = load_prime()
+        if not all_prime:
+            st.stop()
     base = HOLDINGS if mode == "保有銘柄（25銘柄）" else all_prime
     etf_codes = ["1570", "1568", "1306"]
     targets = [t for t in base if t[0] not in ALWAYS_INCLUDE]
