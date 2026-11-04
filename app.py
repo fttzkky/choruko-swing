@@ -15,10 +15,6 @@ st.set_page_config(page_title="ちょる子式スイングトレード判定", l
 st.title("ちょる子式スイングトレード判定")
 st.caption("ZAi 2026年9月号掲載手法 STEP3版")
 
-st.sidebar.markdown("**アプリ一覧**")
-st.sidebar.markdown("[レバウン式](https://reboun-app-fqpqv4e5nqdkqy3tibcxqn.streamlit.app/)")
-st.sidebar.markdown("[ちょる子式（このアプリ）](https://choruko-swing-dwf39ocwzqubb3uattpjmi.streamlit.app)")
-st.sidebar.markdown("[ひよこ式](https://choruko-swing-anvaomt9aunocm5irspcob.streamlit.app)")
 
 HOLDINGS = [
     ("1332", "ニッスイ"), ("2282", "日本ハム"), ("2432", "ディーエヌエー"),
@@ -309,11 +305,12 @@ if st.button("スキャン開始", type="primary"):
         s3n = d["s3n_best"] if use_best else d["s3n"]
         color = "🟢" if s3n >= 3 else ("🟡" if s3n >= 2 else "🔴")
         date_label = f"　📅 {d['best_date']}" if use_best else ""
-        with st.expander(
-            f"{color} {d['name']} ({d['code']})　STEP3: {s3n}/4クリア{date_label}"
-            f"　株価: ¥{d['price']:,}　前日比: {d['change_pct']:+.1f}%"
-            f"　データ日: {d.get('last_date', '-')}"
-        ):
+        with st.container(border=True):
+            st.markdown(
+                f"**{color} {d['name']} ({d['code']})**　STEP3: {s3n}/4クリア{date_label}"
+                f"　株価: ¥{d['price']:,}　前日比: {d['change_pct']:+.1f}%"
+                f"　データ日: {d.get('last_date', '-')}"
+            )
             col1, col2 = st.columns(2)
             with col1:
                 st.write("✅" if s3["change_pct"] <= -2.5 else "❌", f"前日比: {s3['change_pct']:+.1f}%")
@@ -365,4 +362,10 @@ if st.button("スキャン開始", type="primary"):
     else:
         st.info("該当なし")
 
+st.markdown(
+    "**アプリ一覧**　"
+    "[レバウン式](https://reboun-app-fqpqv4e5nqdkqy3tibcxqn.streamlit.app/)　"
+    "[ちょる子式（このアプリ）](https://choruko-swing-dwf39ocwzqubb3uattpjmi.streamlit.app)　"
+    "[ひよこ式](https://choruko-swing-anvaomt9aunocm5irspcob.streamlit.app)"
+)
 st.caption("⚠️ 投資判断はご自身の責任で")
